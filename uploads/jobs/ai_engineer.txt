@@ -1,0 +1,14 @@
+Role: AI Engineer
+
+Required Skills:
+
+Python
+FastAPI
+LangChain
+RAG
+Vector Databases
+Docker
+Kubernetes
+
+Experience:
+2-5 years

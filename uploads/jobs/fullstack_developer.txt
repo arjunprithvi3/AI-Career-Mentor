@@ -1,0 +1,21 @@
+Role: Full‑Stack Developer
+
+Required Skills: 
+
+JavaScript 
+ReactJS 
+Angular 
+Vue 
+Node.js 
+Express 
+HTML 
+CSS 
+REST APIs 
+SQL 
+NoSQL 
+Databases 
+Git CI/CD 
+Cloud Deployment
+
+Experience: 
+2–5 years

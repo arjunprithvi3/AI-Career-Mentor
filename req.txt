@@ -1,0 +1,15 @@
+fastapi
+uvicorn
+langchain
+langchain-core
+langchain-community
+chromadb
+langchain-groq
+sqlalchemy
+pypdf
+streamlit
+python-dotenv
+ipykernel
+langchain-huggingface
+faiss-cpu
+sentence-transformers

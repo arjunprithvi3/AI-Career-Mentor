@@ -1,0 +1,15 @@
+Role: Machine Learning Engineer
+
+Required Skills:
+
+Python
+Numpy
+Pandas
+Machine Learning
+Scikit Learn
+TensorFlow
+PyTorch
+Docker
+
+Experience:
+3-4 years
