@@ -107,6 +107,6 @@ def get_resource_recommendations(target_role: str):
 
 
 @app.post("/career-agent", response_model=OrchestratorResponse)
-def career_agent(request: OrchestratorRequest) -> OrchestratorResponse:
+def career_agent(request: OrchestratorRequest):
     service = CareerOrchestratorService()
     return service.process(message=request.message)

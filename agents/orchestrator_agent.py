@@ -1,164 +1,103 @@
+import json
+from typing import Any
+
 from langchain.agents import create_agent
-from langchain_core.tools import StructuredTool
+from langchain_core.messages import AIMessage, ToolMessage
 
 from app.core import app_state
-from schemas.orchestrator_schema import OrchestratorResponse
+from schemas.orchestrator_schema import OrchestratorResponse, ToolExecutionResult
 from tools.orchestrator import career_tools
 from tools.prompt import ORCHESTRATOR_PROMPT
 
 
 class CareerOrchestrator:
     def __init__(self):
-
         if app_state.llm is None:
             raise RuntimeError(
-                "LLM is not initialized. Ensure the "
-                "FastAPI lifespan calls initialize_app()."
+                "LLM is not initialized. Ensure "
+                "initialize_app() runs during FastAPI startup."
             )
-
-        # --------------------------------------------------
-        # Agent 1: Career orchestration + career tools
-        # --------------------------------------------------
-
         self.agent = create_agent(
             model=app_state.llm,
             tools=career_tools,
-            system_prompt=ORCHESTRATOR_PROMPT,
+            system_prompt=(ORCHESTRATOR_PROMPT),
+            name="career_orchestrator",
+            debug=False,
         )
 
-        # --------------------------------------------------
-        # Final Pydantic response tool
-        # --------------------------------------------------
-
-        def submit_response(**kwargs):
-            response = OrchestratorResponse.model_validate(kwargs)
-            return response.model_dump()
-
-        self.response_tool = StructuredTool.from_function(
-            func=submit_response,
-            name="submit_orchestrator_response",
-            description=(
-                "Submit the final career response. "
-                "This tool must be called after completing "
-                "the required career analysis."
-            ),
-            args_schema=OrchestratorResponse,
-        )
-
-        # --------------------------------------------------
-        # Agent 2: Final structured response
-        # --------------------------------------------------
-
-        final_model = app_state.llm.bind(tool_choice="submit_orchestrator_response")
-
-        self.final_agent = create_agent(
-            model=final_model,
-            tools=[self.response_tool],
-            system_prompt="""
-You are the final response formatter.
-
-You receive the results produced by the career orchestration agent.
-
-You MUST call the tool:
-
-submit_orchestrator_response
-
-Do not answer with normal text.
-
-Do not return Markdown.
-
-Do not explain your reasoning.
-
-Put all final information inside the Pydantic response
-required by submit_orchestrator_response.
-
-Include only sections relevant to the user's request. Summarize tool results
-concisely and do not repeat the same skills or details across sections. Keep
-final_guidance to one or two sentences.
-
-When resource_recommendations are included, every item must include
-skill, title, provider, resource_type, level, url, and reason.
-Copy each resource's reason from the tool results; do not omit it.
-""",
-        )
-
-    def invoke(self, user_message: str):
-
+    def invoke(self, user_message: str) -> OrchestratorResponse:
         cleaned_message = user_message.strip()
-
         if not cleaned_message:
             raise ValueError("User message cannot be empty.")
-
-        # --------------------------------------------------
-        # STEP 1: Run career agent
-        # --------------------------------------------------
-
         result = self.agent.invoke(
-            {
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": cleaned_message,
-                    }
-                ]
-            }
+            {"messages": [{"role": "user", "content": cleaned_message}]}
         )
-
         messages = result.get("messages", [])
-
-        if not messages:
-            raise ValueError("The career orchestrator returned no messages.")
-
-        # Get the final message from Agent 1
-        final_message = messages[-1].content
-
-        # --------------------------------------------------
-        # STEP 2: Pass result to final structured agent
-        # --------------------------------------------------
-
-        tool_results = "\n\n".join(
-            str(message.content)
-            for message in messages
-            if getattr(message, "type", None) == "tool"
+        tool_results = self._extract_tool_results(messages)
+        final_answer = self._extract_final_answer(messages)
+        if not final_answer:
+            final_answer = self._build_fallback_answer(tool_results)
+        return OrchestratorResponse(
+            answer=final_answer,
+            tools_called=[item.tool_name for item in tool_results],
+            tool_results=tool_results,
         )
 
-        final_result = self.final_agent.invoke(
-            {
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": f"""
-User request:
+    @staticmethod
+    def _extract_tool_results(messages: list[Any]) -> list[ToolExecutionResult]:
+        results = []
+        for message in messages:
+            if not isinstance(message, ToolMessage):
+                continue
+            try:
+                payload = json.loads(message.content)
+                results.append(
+                    ToolExecutionResult(
+                        tool_name=payload.get(
+                            "tool_name", message.name or "unknown_tool"
+                        ),
+                        target_role=payload.get("target_role"),
+                        success=payload.get("success", True),
+                        output=payload.get("output"),
+                        error=payload.get("error"),
+                    )
+                )
+            except (json.JSONDecodeError, TypeError):
+                results.append(
+                    ToolExecutionResult(
+                        tool_name=(message.name or "unknown_tool"),
+                        target_role=None,
+                        success=True,
+                        output=message.content,
+                        error=None,
+                    )
+                )
+        return results
 
-{cleaned_message}
+    @staticmethod
+    def _extract_final_answer(messages: list[Any]) -> str:
+        for message in reversed(messages):
+            if not isinstance(message, AIMessage):
+                continue
+            content = message.content
+            if isinstance(content, str):
+                return content.strip()
+            return json.dumps(content, default=str)
+        return ""
 
-Career orchestration result:
-
-Tool results:
-{tool_results}
-
-Orchestrator summary:
-{final_message}
-
-Create the final structured response.
-You MUST call submit_orchestrator_response.
-""",
-                    }
-                ]
-            }
-        )
-
-        # --------------------------------------------------
-        # STEP 3: Extract Pydantic tool call
-        # --------------------------------------------------
-
-        final_messages = final_result.get("messages", [])
-
-        for message in reversed(final_messages):
-            tool_calls = getattr(message, "tool_calls", [])
-
-            for tool_call in tool_calls:
-                if tool_call["name"] == "submit_orchestrator_response":
-                    return OrchestratorResponse.model_validate(tool_call["args"])
-
-        raise ValueError("The final agent did not return submit_orchestrator_response.")
+    @staticmethod
+    def _build_fallback_answer(tool_results: list[ToolExecutionResult]) -> str:
+        successful_tools = [
+            result.tool_name for result in tool_results if result.success
+        ]
+        failed_tools = [
+            result.tool_name for result in tool_results if not result.success
+        ]
+        parts = []
+        if successful_tools:
+            parts.append("Completed: " + ", ".join(successful_tools) + ".")
+        if failed_tools:
+            parts.append("Unable to complete: " + ", ".join(failed_tools) + ".")
+        if not parts:
+            return "No career tools were called. Please provide a target role."
+        return " ".join(parts)
