@@ -7,7 +7,7 @@ from langchain_core.documents import Document
 from rag.ingestion import create_embeddings
 
 RESOURCE_DIRECTORY = Path("uploads/resources")
-FAISS_INDEX_PATH = "/vector_stores/resource_collection"
+FAISS_INDEX_PATH = "vector_stores/resource_collection"
 
 
 def load_resource_documents() -> list[Document]:
