@@ -12,4 +12,4 @@ python-dotenv
 ipykernel
 langchain-huggingface
 faiss-cpu
-sentence-transformers
+langchain_cohere
